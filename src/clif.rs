@@ -23,6 +23,17 @@ macro_rules! impl_clif_bv {
                 "sshr" = Sshr([Id; 2]),
                 "rotl" = Rotl([Id; 2]),
                 "rotr" = Rotr([Id; 2]),
+                "eq" = Eq([Id; 2]),
+                "ne" = Ne([Id; 2]),
+                "ule" = Ule([Id; 2]),
+                "ult" = Ult([Id; 2]),
+                "uge" = Uge([Id; 2]),
+                "ugt" = Ugt([Id; 2]),
+                "sle" = Sle([Id; 2]),
+                "slt" = Slt([Id; 2]),
+                "sge" = Sge([Id; 2]),
+                "sgt" = Sgt([Id; 2]),
+                "select" = Select([Id; 3]),
                 "clz" = Clz(Id),
                 "ctz" = Ctz(Id),
                 "cls" = Cls(Id),
@@ -58,6 +69,18 @@ macro_rules! impl_clif_bv {
 
                     Clif::Rotl([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_rotl(*b))),
                     Clif::Rotr([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_rotr(*b))),
+
+                    Clif::Eq([a, b]) => map!(get_cvec, a, b => Some(a.bv_eq(*b))),
+                    Clif::Ne([a, b]) => map!(get_cvec, a, b => Some(a.bv_ne(*b))),
+                    Clif::Ule([a, b]) => map!(get_cvec, a, b => Some(a.ule(*b))),
+                    Clif::Ult([a, b]) => map!(get_cvec, a, b => Some(a.ult(*b))),
+                    Clif::Uge([a, b]) => map!(get_cvec, a, b => Some(a.uge(*b))),
+                    Clif::Ugt([a, b]) => map!(get_cvec, a, b => Some(a.ugt(*b))),
+                    Clif::Sle([a, b]) => map!(get_cvec, a, b => Some(a.sle(*b))),
+                    Clif::Slt([a, b]) => map!(get_cvec, a, b => Some(a.slt(*b))),
+                    Clif::Sge([a, b]) => map!(get_cvec, a, b => Some(a.sge(*b))),
+                    Clif::Sgt([a, b]) => map!(get_cvec, a, b => Some(a.sgt(*b))),
+                    Clif::Select([c, a, b]) => map!(get_cvec, c, a, b => Some(c.select(*a, *b))),
 
                     Clif::Clz(a) => map!(get_cvec, a => Some(a.count_leading_zeros())),
                     Clif::Ctz(a) => map!(get_cvec, a => Some(a.count_trailing_zeros())),
@@ -133,6 +156,15 @@ macro_rules! impl_clif_bv {
                     shift.bvand(&mask)
                 }
 
+                fn bool_to_bv<'a>(
+                    ctx: &'a z3::Context,
+                    cond: &z3::ast::Bool<'a>,
+                ) -> z3::ast::BV<'a> {
+                    let one = z3::ast::BV::from_u64(ctx, 1, $n);
+                    let zero = z3::ast::BV::from_u64(ctx, 0, $n);
+                    cond.ite(&one, &zero)
+                }
+
                 fn egg_to_z3<'a>(ctx: &'a z3::Context, expr: &[Clif]) -> z3::ast::BV<'a> {
                     let mut buf: Vec<z3::ast::BV> = vec![];
                     for node in expr.as_ref().iter() {
@@ -186,6 +218,52 @@ macro_rules! impl_clif_bv {
                                 let amount = shift_amount(ctx, &buf[usize::from(*b)]);
                                 buf.push(buf[usize::from(*a)].bvrotr(&amount));
                             },
+
+                            Clif::Eq([a, b]) => {
+                                let cond = buf[usize::from(*a)]._eq(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Ne([a, b]) => {
+                                let cond = buf[usize::from(*a)]._eq(&buf[usize::from(*b)]).not();
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Ule([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvule(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Ult([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvult(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Uge([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvuge(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Ugt([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvugt(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Sle([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvsle(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Slt([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvslt(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Sge([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvsge(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Sgt([a, b]) => {
+                                let cond = buf[usize::from(*a)].bvsgt(&buf[usize::from(*b)]);
+                                buf.push(bool_to_bv(ctx, &cond));
+                            }
+                            Clif::Select([c, a, b]) => {
+                                let zero = z3::ast::BV::from_u64(ctx, 0, $n);
+                                let cond = buf[usize::from(*c)]._eq(&zero).not();
+                                buf.push(cond.ite(&buf[usize::from(*a)], &buf[usize::from(*b)]));
+                            }
 
                             // For bit-counting operations, we build structural formulas or conditional sequences:
                             Clif::Clz(a) => {

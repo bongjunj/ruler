@@ -96,6 +96,35 @@ fn bits_semantics() {
 }
 
 #[test]
+fn comparison_and_select_semantics() {
+    let zero = BV::from(0);
+    let one = BV::from(1);
+    let two = BV::from(2);
+    let neg_one = BV::from(0xffff_ffffu128);
+    let sign_bit = BV::from(0x8000_0000u128);
+
+    assert_eq!(zero.bv_eq(zero).0, 1);
+    assert_eq!(zero.bv_eq(one).0, 0);
+    assert_eq!(zero.bv_ne(one).0, 1);
+    assert_eq!(one.bv_ne(one).0, 0);
+
+    assert_eq!(zero.ult(neg_one).0, 1);
+    assert_eq!(neg_one.ugt(zero).0, 1);
+    assert_eq!(zero.ule(zero).0, 1);
+    assert_eq!(neg_one.uge(zero).0, 1);
+
+    assert_eq!(neg_one.slt(zero).0, 1);
+    assert_eq!(zero.sgt(neg_one).0, 1);
+    assert_eq!(sign_bit.slt(zero).0, 1);
+    assert_eq!(neg_one.sle(neg_one).0, 1);
+    assert_eq!(zero.sge(neg_one).0, 1);
+
+    assert_eq!(zero.select(one, two).0, two.0);
+    assert_eq!(one.select(one, two).0, one.0);
+    assert_eq!(two.select(one, zero).0, one.0);
+}
+
+#[test]
 fn z3_validates_rotation_semantics() {
     assert!(valid("(rotl a 0) <=> a"));
     assert!(valid("(rotr a 0) <=> a"));
@@ -147,6 +176,23 @@ fn z3_validates_masked_shift_identities() {
 }
 
 #[test]
+fn z3_validates_comparison_and_select_semantics() {
+    assert!(valid("(ult a b) <=> (ugt b a)"));
+    assert!(valid("(ule a b) <=> (uge b a)"));
+    assert!(valid("(slt a b) <=> (sgt b a)"));
+    assert!(valid("(sle a b) <=> (sge b a)"));
+    assert!(valid("(eq a b) <=> (eq b a)"));
+    assert!(valid("(ne a b) <=> (ne b a)"));
+
+    assert!(valid("(select 0 a b) <=> b"));
+    assert!(valid("(select 1 a b) <=> a"));
+    assert!(valid("(select 2 a b) <=> a"));
+
+    assert!(!valid("(ult -1 0) <=> 1"));
+    assert!(!valid("(slt 0 -1) <=> 1"));
+}
+
+#[test]
 fn parses_negative_constants_as_wrapped_bitvectors() {
     assert_eq!("-1".parse::<BV>().unwrap().0, 0xffff_ffff);
 }
@@ -163,8 +209,10 @@ fn synthesize_clif32_shift_rules() {
             &[
                 &["ineg", "bnot"],
                 &[
-                    "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr",
+                    "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr", "eq",
+                    "ne", "ule", "ult", "uge", "ugt", "sle", "slt", "sge", "sgt",
                 ],
+                &["select"],
             ],
         ),
         Ruleset::<Clif>::default(),

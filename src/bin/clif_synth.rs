@@ -24,8 +24,9 @@ fn main() {
                 &["ineg", "bnot", "ctz", "clz", "cls", "popcnt"],
                 &[
                     "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr", "rotl",
-                    "rotr",
+                    "rotr", "eq", "ne", "ule", "ult", "uge", "ugt", "sle", "slt", "sge", "sgt",
                 ],
+                &["select"],
             ],
         ),
         Ruleset::<Clif>::default(),

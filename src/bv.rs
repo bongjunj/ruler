@@ -144,6 +144,67 @@ impl<const N: Inner> BV<N> {
         let bits = self.0 & Self::ALL_ONES.0;
         Self::new(bits.count_ones() as u128)
     }
+
+    pub fn bool(b: bool) -> Self {
+        if b {
+            Self::new(1u128)
+        } else {
+            Self::ZERO
+        }
+    }
+
+    fn signed(self) -> i128 {
+        let extend = (INNER_N - N) as u32;
+        ((self.0 << extend) as i128) >> extend
+    }
+
+    pub fn bv_eq(self, rhs: Self) -> Self {
+        Self::bool(self.0 == rhs.0)
+    }
+
+    pub fn bv_ne(self, rhs: Self) -> Self {
+        Self::bool(self.0 != rhs.0)
+    }
+
+    pub fn ule(self, rhs: Self) -> Self {
+        Self::bool(self.0 <= rhs.0)
+    }
+
+    pub fn ult(self, rhs: Self) -> Self {
+        Self::bool(self.0 < rhs.0)
+    }
+
+    pub fn uge(self, rhs: Self) -> Self {
+        Self::bool(self.0 >= rhs.0)
+    }
+
+    pub fn ugt(self, rhs: Self) -> Self {
+        Self::bool(self.0 > rhs.0)
+    }
+
+    pub fn sle(self, rhs: Self) -> Self {
+        Self::bool(self.signed() <= rhs.signed())
+    }
+
+    pub fn slt(self, rhs: Self) -> Self {
+        Self::bool(self.signed() < rhs.signed())
+    }
+
+    pub fn sge(self, rhs: Self) -> Self {
+        Self::bool(self.signed() >= rhs.signed())
+    }
+
+    pub fn sgt(self, rhs: Self) -> Self {
+        Self::bool(self.signed() > rhs.signed())
+    }
+
+    pub fn select(self, then_val: Self, else_val: Self) -> Self {
+        if self.0 != 0 {
+            then_val
+        } else {
+            else_val
+        }
+    }
 }
 
 impl<const N: Inner> Not for BV<N> {
