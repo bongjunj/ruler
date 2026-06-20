@@ -5,21 +5,22 @@ use log::info;
 use ruler::{
     enumo::{Filter, Metric, Ruleset, Workload},
     recipe_utils::{recursive_rules, run_workload, Lang},
-    Limits,
+    Limits, SynthLanguage,
 };
-
-ruler::impl_clif_bv!(32);
 
 #[derive(Parser)]
 struct Args {
     #[clap(long, default_value_t = 4)]
     atoms: usize,
 
+    #[clap(long, default_value_t = 32)]
+    bits: u16,
+
     #[clap(long, default_value_t = Strategy::Naive)]
     strategy: Strategy,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Copy, Debug, Parser)]
 enum Strategy {
     /// Naive Enumerative Synthesis
     Naive,
@@ -53,18 +54,93 @@ fn main() {
 
     let args = Args::parse();
 
-    match args.strategy {
-        Strategy::Naive => naive_synthesis(args.atoms),
-        Strategy::Halide => halide_like_synthesis(args.atoms),
+    match args.bits {
+        8 => clif8::run(args.strategy, args.atoms),
+        16 => clif16::run(args.strategy, args.atoms),
+        32 => clif32::run(args.strategy, args.atoms),
+        64 => clif64::run(args.strategy, args.atoms),
+        bits => panic!(
+            "unsupported CLIF bit width {}; expected one of 8, 16, 32, or 64",
+            bits
+        ),
     }
 }
 
-fn naive_synthesis(atoms: usize) {
+mod clif8 {
+    ruler::impl_clif_bv!(8);
+
+    pub fn run(strategy: super::Strategy, atoms: usize) {
+        super::run::<Clif>(strategy, atoms, 8);
+    }
+}
+
+mod clif16 {
+    ruler::impl_clif_bv!(16);
+
+    pub fn run(strategy: super::Strategy, atoms: usize) {
+        super::run::<Clif>(strategy, atoms, 16);
+    }
+}
+
+mod clif32 {
+    ruler::impl_clif_bv!(32);
+
+    pub fn run(strategy: super::Strategy, atoms: usize) {
+        super::run::<Clif>(strategy, atoms, 32);
+    }
+}
+
+mod clif64 {
+    ruler::impl_clif_bv!(64);
+
+    pub fn run(strategy: super::Strategy, atoms: usize) {
+        super::run::<Clif>(strategy, atoms, 64);
+    }
+}
+
+fn run<L: SynthLanguage>(strategy: Strategy, atoms: usize, bits: u16) {
+    match strategy {
+        Strategy::Naive => naive_synthesis::<L>(atoms, bits),
+        Strategy::Halide => halide_like_synthesis::<L>(atoms, bits),
+    }
+}
+
+fn lang(vals: Vec<String>, vars: &[&str], ops: &[&[&str]]) -> Lang {
+    Lang {
+        vals,
+        vars: vars.iter().map(|v| v.to_string()).collect(),
+        ops: ops
+            .iter()
+            .map(|ops| ops.iter().map(|op| op.to_string()).collect())
+            .collect(),
+    }
+}
+
+fn base_vals() -> Vec<String> {
+    ["0", "1", "-1", "2"]
+        .iter()
+        .map(|v| v.to_string())
+        .collect()
+}
+
+fn shift_vals(bits: u16) -> Vec<String> {
+    let mut vals = base_vals();
+    vals.extend([
+        (bits - 1).to_string(),
+        bits.to_string(),
+        (bits + 1).to_string(),
+    ]);
+    vals.sort();
+    vals.dedup();
+    vals
+}
+
+fn naive_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
     let rules = recursive_rules(
         Metric::Atoms,
         atoms,
-        Lang::new(
-            &["0", "1", "-1", "2", "31", "32", "33"],
+        lang(
+            shift_vals(bits),
             &["x", "y", "z"],
             &[
                 &["ineg", "iabs", "bnot", "ctz", "clz", "cls", "popcnt"],
@@ -76,20 +152,20 @@ fn naive_synthesis(atoms: usize) {
                 &["select"],
             ],
         ),
-        Ruleset::<Clif>::default(),
+        Ruleset::<L>::default(),
     );
 
     rules.pretty_print();
 }
 
-fn halide_like_synthesis(atoms: usize) {
-    let mut all_rules = Ruleset::<Clif>::default();
+fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
+    let mut all_rules = Ruleset::<L>::default();
 
     let arith_bits = recursive_rules(
         Metric::Atoms,
         atoms,
-        Lang::new(
-            &["0", "1", "-1", "2"],
+        lang(
+            base_vals(),
             &["x", "y", "z"],
             &[
                 &["ineg", "iabs", "bnot"],
@@ -107,8 +183,8 @@ fn halide_like_synthesis(atoms: usize) {
     let shift_bits = recursive_rules(
         Metric::Atoms,
         atoms,
-        Lang::new(
-            &["0", "1", "-1", "2", "31", "32", "33"],
+        lang(
+            shift_vals(bits),
             &["x", "y", "z"],
             &[
                 &["bnot"],
@@ -126,8 +202,8 @@ fn halide_like_synthesis(atoms: usize) {
     let cmp_select = recursive_rules(
         Metric::Atoms,
         atoms,
-        Lang::new(
-            &["0", "1", "-1", "2"],
+        lang(
+            base_vals(),
             &["x", "y", "z"],
             &[
                 &["ineg", "iabs", "bnot"],
@@ -147,8 +223,8 @@ fn halide_like_synthesis(atoms: usize) {
     let div_rem = recursive_rules(
         Metric::Atoms,
         atoms,
-        Lang::new(
-            &["0", "1", "-1", "2"],
+        lang(
+            base_vals(),
             &["x", "y", "z"],
             &[&["ineg", "iabs"], &["udiv", "sdiv", "urem", "srem"]],
         ),
@@ -161,8 +237,8 @@ fn halide_like_synthesis(atoms: usize) {
     let full = recursive_rules(
         Metric::Atoms,
         full_atoms,
-        Lang::new(
-            &["0", "1", "-1", "2", "31", "32", "33"],
+        lang(
+            shift_vals(bits),
             &["x", "y", "z"],
             &[
                 &["ineg", "iabs", "bnot", "ctz", "clz", "cls", "popcnt"],
