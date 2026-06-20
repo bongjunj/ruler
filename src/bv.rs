@@ -56,6 +56,23 @@ impl<const N: Inner> BV<N> {
             Self::new(self.0 >> rhs.0)
         }
     }
+
+    pub fn wrapping_ishl(self, rhs: Self) -> Self {
+        let shift = rhs.0 & (N - 1);
+        Self::new(self.0 << shift)
+    }
+
+    pub fn wrapping_ushr(self, rhs: Self) -> Self {
+        let shift = rhs.0 & (N - 1);
+        Self::new(self.0 >> shift)
+    }
+
+    pub fn wrapping_sshr(self, rhs: Self) -> Self {
+        let shift = (rhs.0 & (N - 1)) as u32;
+        let extend = (INNER_N - N) as u32;
+        let signed = ((self.0 << extend) as i128) >> extend;
+        Self::new((signed >> shift) as u128)
+    }
 }
 
 impl<const N: Inner> Not for BV<N> {
@@ -115,6 +132,10 @@ impl<const N: Inner> std::str::FromStr for BV<N> {
         if let Some(stripped) = s.strip_prefix("#b") {
             let i = Inner::from_str_radix(stripped, 2).unwrap();
             return Ok(Self::new(i));
+        }
+        if let Some(stripped) = s.strip_prefix('-') {
+            let i = stripped.parse::<Inner>()?;
+            return Ok(Self::new(0u128.wrapping_sub(i)));
         }
         s.parse::<Inner>().map(Self::new)
     }
