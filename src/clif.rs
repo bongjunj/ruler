@@ -21,6 +21,12 @@ macro_rules! impl_clif_bv {
                 "ishl" = Ishl([Id; 2]),
                 "ushr" = Ushr([Id; 2]),
                 "sshr" = Sshr([Id; 2]),
+                "rotl" = Rotl([Id; 2]),
+                "rotr" = Rotr([Id; 2]),
+                "clz" = Clz(Id),
+                "ctz" = Ctz(Id),
+                "cls" = Cls(Id),
+                "popcnt" = PopCnt(Id),
                 Lit(BV),
                 Var(egg::Symbol),
             }
@@ -48,6 +54,15 @@ macro_rules! impl_clif_bv {
                     Clif::Ishl([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_ishl(*b))),
                     Clif::Ushr([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_ushr(*b))),
                     Clif::Sshr([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_sshr(*b))),
+
+
+                    Clif::Rotl([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_rotl(*b))),
+                    Clif::Rotr([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_rotr(*b))),
+
+                    Clif::Clz(a) => map!(get_cvec, a => Some(a.count_leading_zeros())),
+                    Clif::Ctz(a) => map!(get_cvec, a => Some(a.count_trailing_zeros())),
+                    Clif::Cls(a) => map!(get_cvec, a => Some(a.count_leading_signbits())),
+                    Clif::PopCnt(a) => map!(get_cvec, a => Some(a.popcnt())),
 
                     Clif::Lit(n) => vec![Some(n.clone()); cvec_len],
                     Clif::Var(_) => vec![],
@@ -160,6 +175,79 @@ macro_rules! impl_clif_bv {
                             }
                             Clif::Bnot(a) => buf.push(buf[usize::from(*a)].bvnot()),
                             Clif::Ineg(a) => buf.push(buf[usize::from(*a)].bvneg()),
+
+                            // (a << b) | (a >>a (N - b))
+                            Clif::Rotl([a, b]) => {
+                                let amount = shift_amount(ctx, &buf[usize::from(*b)]);
+                                buf.push(buf[usize::from(*a)].bvrotl(&amount));
+                            },
+                            // (a >> b) | (a <<a (N - b))
+                            Clif::Rotr([a, b]) => {
+                                let amount = shift_amount(ctx, &buf[usize::from(*b)]);
+                                buf.push(buf[usize::from(*a)].bvrotr(&amount));
+                            },
+
+                            // For bit-counting operations, we build structural formulas or conditional sequences:
+                            Clif::Clz(a) => {
+                                let val = &buf[usize::from(*a)];
+                                let mut acc = z3::ast::BV::from_u64(ctx, $n as u64, $n);
+
+                                // Check bit by bit from MSB down to LSB
+                                for i in 0..$n {
+                                    let bit = val.extract(i, i);
+                                    let is_one = bit._eq(&z3::ast::BV::from_u64(ctx, 1, 1));
+                                    let count_at_i = z3::ast::BV::from_u64(ctx, (($n - 1) - i) as u64, $n);
+
+                                    // If this bit is 1, it overrides previous values because it's the highest '1'
+                                    acc = is_one.ite(&count_at_i, &acc);
+                                }
+                                buf.push(acc);
+                            }
+
+                            Clif::Ctz(a) => {
+                                let val = &buf[usize::from(*a)];
+                                let mut acc = z3::ast::BV::from_u64(ctx, $n as u64, $n);
+
+                                // Check bit by bit from LSB up to MSB
+                                for i in (0..$n).rev() {
+                                    let bit = val.extract(i, i);
+                                    let is_one = bit._eq(&z3::ast::BV::from_u64(ctx, 1, 1));
+                                    let count_at_i = z3::ast::BV::from_u64(ctx, i as u64, $n);
+
+                                    // If this bit is 1, it overrides because it's the lowest '1'
+                                    acc = is_one.ite(&count_at_i, &acc);
+                                }
+                                buf.push(acc);
+                            }
+
+                            Clif::Cls(a) => {
+                                let val = &buf[usize::from(*a)];
+                                let sign_bit = val.extract($n - 1, $n - 1);
+                                let mut acc = z3::ast::BV::from_u64(ctx, ($n - 1) as u64, $n);
+
+                                // Check consecutive matching sign bits from MSB-1 down to LSB
+                                for i in 0..($n - 1) {
+                                    let bit = val.extract(i, i);
+                                    let matches_sign = bit._eq(&sign_bit);
+                                    let count_at_i = z3::ast::BV::from_u64(ctx, (($n - 1) - 1 - i) as u64, $n);
+
+                                    // If the bit differs from the sign bit, we update our fallback accumulator
+                                    acc = matches_sign.ite(&acc, &count_at_i);
+                                }
+                                buf.push(acc);
+                            }
+
+                            Clif::PopCnt(a) => {
+                                let val = &buf[usize::from(*a)];
+
+                                // Zero-extend each single bit to size $n, then sum them up
+                                let mut sum = z3::ast::BV::from_u64(ctx, 0, $n);
+                                for i in 0..$n {
+                                    let bit = val.extract(i, i).zero_ext($n - 1);
+                                    sum = sum.bvadd(&bit);
+                                }
+                                buf.push(sum);
+                            }
                         }
                     }
                     buf.pop().unwrap()

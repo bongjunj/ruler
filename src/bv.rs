@@ -73,6 +73,77 @@ impl<const N: Inner> BV<N> {
         let signed = ((self.0 << extend) as i128) >> extend;
         Self::new((signed >> shift) as u128)
     }
+
+    pub fn wrapping_rotl(self, rhs: Self) -> Self {
+        let shift = rhs.0 & (N - 1);
+        if shift == 0 {
+            self
+        } else {
+            Self::new((self.0 << shift) | (self.0 >> (N - shift)))
+        }
+    }
+
+    pub fn wrapping_rotr(self, rhs: Self) -> Self {
+        let shift = rhs.0 & (N - 1);
+        if shift == 0 {
+            self
+        } else {
+            Self::new((self.0 >> shift) | (self.0 << (N - shift)))
+        }
+    }
+
+    pub fn count_leading_zeros(self) -> Self {
+        let total_bits = 128;
+        let padding_bits = total_bits - N;
+        // CAUTION: this counts zeros from u128 container
+        let zeros = self.0.leading_zeros() as u128;
+        let actual_zeros = zeros.saturating_sub(padding_bits);
+        Self::new(actual_zeros)
+    }
+
+    pub fn count_trailing_zeros(self) -> Self {
+        if self.0 == 0 {
+            // capped to N
+            return Self::new(N);
+        }
+        let trailing_zeros = self.0.trailing_zeros() as u128;
+        Self::new(trailing_zeros)
+    }
+
+    pub fn count_leading_signbits(self) -> Self {
+        // 1. Get the sign bit of your N-bit integer.
+        // Shift right by (N - 1) to see if the MSB is 1 or 0.
+        let is_negative = ((self.0 >> (N - 1)) & 1) == 1;
+
+        let zeros = if is_negative {
+            // If negative, we care about consecutive 1s.
+            // We flip the bits, but we must only look at the valid N bits.
+            let inverted = !self.0;
+
+            // Clear out the padding bits at the top of the u128 container
+            // so they don't look like leading zeros.
+            let mask = (1u128 << N) - 1;
+            let valid_inverted = inverted & mask;
+
+            // Count leading zeros of the u128, then subtract the container padding
+            valid_inverted.leading_zeros() as u128 - (128 - N)
+        } else {
+            // If positive, we care about consecutive 0s.
+            // Just count leading zeros and subtract the container padding.
+            self.0.leading_zeros() as u128 - (128 - N)
+        };
+
+        // The definition asks for consecutive bits *after* the sign bit.
+        // Since zeros counted the sign bit itself, we subtract 1.
+        let result = zeros - 1;
+
+        Self::new(result)
+    }
+
+    pub fn popcnt(self) -> Self {
+        let bits = self.0 & Self::ALL_ONES.0;
+        Self::new(bits.count_ones() as u128)
+    }
 }
 
 impl<const N: Inner> Not for BV<N> {
