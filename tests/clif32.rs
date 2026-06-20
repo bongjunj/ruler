@@ -125,6 +125,19 @@ fn comparison_and_select_semantics() {
 }
 
 #[test]
+fn iabs_semantics() {
+    let zero = BV::from(0);
+    let one = BV::from(1);
+    let neg_one = BV::from(0xffff_ffffu128);
+    let min = BV::from(0x8000_0000u128);
+
+    assert_eq!(zero.iabs().0, zero.0);
+    assert_eq!(one.iabs().0, one.0);
+    assert_eq!(neg_one.iabs().0, one.0);
+    assert_eq!(min.iabs().0, min.0);
+}
+
+#[test]
 fn division_and_remainder_semantics() {
     let zero = BV::from(0);
     let one = BV::from(1);
@@ -235,6 +248,17 @@ fn z3_validates_comparison_and_select_semantics() {
 }
 
 #[test]
+fn z3_validates_iabs_semantics() {
+    assert!(valid("(iabs 0) <=> 0"));
+    assert!(valid("(iabs 1) <=> 1"));
+    assert!(valid("(iabs -1) <=> 1"));
+    assert!(valid("(iabs -2147483648) <=> -2147483648"));
+    assert!(valid("(iabs (iabs a)) <=> (iabs a)"));
+
+    assert!(!valid("(iabs a) <=> a"));
+}
+
+#[test]
 fn z3_validates_division_and_remainder_semantics() {
     assert!(valid("(udiv a 1) <=> a"));
     assert!(valid("(sdiv a 1) <=> a"));
@@ -280,7 +304,7 @@ fn synthesize_clif32_shift_rules() {
             &["0", "1", "-1", "31", "32", "33"],
             &["a", "b"],
             &[
-                &["ineg", "bnot"],
+                &["ineg", "iabs", "bnot"],
                 &[
                     "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor",
                     "ishl", "ushr", "sshr", "umin", "umax", "smin", "smax", "eq", "ne", "ule",

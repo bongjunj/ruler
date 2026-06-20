@@ -41,6 +41,14 @@ impl<const N: Inner> BV<N> {
         Self::new(self.0.wrapping_neg())
     }
 
+    pub fn iabs(self) -> Self {
+        if self.signed() >= 0 {
+            self
+        } else {
+            self.wrapping_neg()
+        }
+    }
+
     pub fn my_shl(self, rhs: Self) -> Self {
         if rhs.0 >= N {
             Self::ZERO

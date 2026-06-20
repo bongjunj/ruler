@@ -22,6 +22,7 @@ macro_rules! impl_clif_bv {
                 "smin" = Smin([Id; 2]),
                 "smax" = Smax([Id; 2]),
                 "ineg" = Ineg(Id),
+                "iabs" = Iabs(Id),
                 "bnot" = Bnot(Id),
                 "band" = Band([Id; 2]),
                 "bor" = Bor([Id; 2]),
@@ -60,6 +61,7 @@ macro_rules! impl_clif_bv {
             {
                 match self {
                     Clif::Ineg(a) => map!(get_cvec, a => Some(a.wrapping_neg())),
+                    Clif::Iabs(a) => map!(get_cvec, a => Some(a.iabs())),
                     Clif::Bnot(a) => map!(get_cvec, a => Some(a.not())),
 
                     Clif::Iadd([a, b]) => map!(get_cvec, a, b => Some(a.wrapping_add(*b))),
@@ -384,6 +386,12 @@ macro_rules! impl_clif_bv {
                             Clif::Ineg(a) => {
                                 let a = &buf[usize::from(*a)];
                                 buf.push(total_unary(a.value.bvneg(), a))
+                            }
+                            Clif::Iabs(a) => {
+                                let a = &buf[usize::from(*a)];
+                                let zero = z3::ast::BV::from_u64(ctx, 0, $n);
+                                let nonnegative = a.value.bvsge(&zero);
+                                buf.push(total_unary(nonnegative.ite(&a.value, &a.value.bvneg()), a))
                             }
 
                             // (a << b) | (a >>a (N - b))

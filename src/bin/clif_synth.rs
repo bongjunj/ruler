@@ -21,7 +21,7 @@ fn main() {
             &["0", "1", "-1", "2", "31", "32", "33"],
             &["x", "y", "z"],
             &[
-                &["ineg", "bnot", "ctz", "clz", "cls", "popcnt"],
+                &["ineg", "iabs", "bnot", "ctz", "clz", "cls", "popcnt"],
                 &[
                     "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor",
                     "ishl", "ushr", "sshr", "rotl", "rotr", "umin", "umax", "smin", "smax", "eq",
