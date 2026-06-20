@@ -3,7 +3,7 @@ use std::str::FromStr;
 use clap::Parser;
 use log::info;
 use ruler::{
-    enumo::{Filter, Metric, Ruleset, Workload},
+    enumo::{Filter, Metric, Rule, Ruleset, Scheduler, Workload},
     recipe_utils::{recursive_rules, run_workload, Lang},
     Limits,
 };
@@ -79,7 +79,46 @@ fn naive_synthesis(atoms: usize) {
         Ruleset::<Clif>::default(),
     );
 
-    rules.pretty_print();
+    let vars = Workload::new(["a", "b", "c"]);
+    let consts = Workload::new(["C1", "C2", "C3"]);
+
+    let unops = Workload::new(["ineg", "iabs", "bnot", "clz", "ctz", "cls", "popcnt"]);
+    let cf_unops = Workload::new([
+        "cf-ineg", "cf-iabs", "cf-bnot", "cf-clz", "cf-ctz", "cf-cls",
+    ]);
+    let binops = Workload::new([
+        "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor", "ishl",
+        "ushr", "sshr", "rotl", "rotr", "umin", "umax", "smin", "smax", "eq", "ne", "ule", "ult",
+        "uge", "ugt", "sle", "slt", "sge", "sgt",
+    ]);
+    let cf_binops = Workload::new([
+        "cf-iadd", "cf-isub", "cf-imul", "cf-udiv", "cf-sdiv", "cf-urem", "cf-srem", "cf-band",
+        "cf-bor", "cf-bxor", "cf-ishl", "cf-ushr", "cf-sshr", "cf-rotl", "cf-rotr", "cf-umin",
+        "cf-umax", "cf-smin", "cf-smax", "cf-eq", "cf-ne", "cf-ule", "cf-ult", "cf-uge", "cf-ugt",
+        "cf-sle", "cf-slt", "cf-sge", "sgcf-t",
+    ]);
+
+    let symbol = vars.clone().append(consts.clone());
+
+    let lhs = Workload::new(["(OP1 V)", "(OP2 V V)", "(select V V V)"])
+        .plug("V", &symbol)
+        .plug("OP1", &unops)
+        .plug("OP2", &binops);
+
+    let rhs = Workload::new(["(OP1 V)", "(OP2 V V)", "(select V V V)"])
+        .plug("V", &vars)
+        .plug("OP1", &unops.clone().append(cf_unops.clone()))
+        .plug("OP2", &binops.clone().append(cf_binops.clone()));
+
+    let rules: Ruleset<Clif> = Ruleset::default();
+    // NOTE: Enumo does not support type terms. It builds a single e-graph
+    // from a set of terms, and extract equivalent e-classes.
+    // It means that it isn't easy to put constraints on LHS/RHS separately.
+    // For example, we want to constraint <op1> and <op2> in "cf-iadd <op1> <op2>"
+    // to expand to constant folding operations and C1/C2/C3.
+    // However such constraint need type-system. However, this will need
+    // much more work.
+    todo!()
 }
 
 fn halide_like_synthesis(atoms: usize) {
@@ -257,4 +296,39 @@ fn halide_like_synthesis(atoms: usize) {
     all_rules.extend(new);
 
     all_rules.pretty_print();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constant_folds_include_iadd_schema() {
+        let rules = synthesize_const_fold_rules().to_str_vec();
+
+        assert!(rules.contains(&"(iadd (k ?a) (k ?b)) ==> (cf-iadd ?a ?b)".to_string()));
+    }
+
+    #[test]
+    fn constant_fold_workload_keeps_markers_on_their_sides() {
+        let terms: Vec<_> = const_fold_workload()
+            .force()
+            .into_iter()
+            .map(|term| term.to_string())
+            .collect();
+
+        let terms: Vec<_> = terms
+            .into_iter()
+            .map(|term| term.replace(' ', ""))
+            .collect();
+
+        assert_eq!(terms, vec!["(iadd(ka)(kb))", "(cf-iaddab)"]);
+    }
+
+    #[test]
+    fn constant_folds_filter_reverse_rule() {
+        let rules = synthesize_const_fold_rules().to_str_vec();
+
+        assert!(!rules.iter().any(|rule| rule.starts_with("(cf-iadd ?")));
+    }
 }
