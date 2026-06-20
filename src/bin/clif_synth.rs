@@ -19,11 +19,12 @@ fn main() {
         args.atoms,
         Lang::new(
             &["0", "1", "-1", "2", "31", "32", "33"],
-            &["a", "b"],
+            &["x", "y", "z"],
             &[
-                &["ineg", "bnot"],
+                &["ineg", "bnot", "ctz", "clz", "cls", "popcnt"],
                 &[
-                    "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr",
+                    "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr", "rotl",
+                    "rotr",
                 ],
             ],
         ),
