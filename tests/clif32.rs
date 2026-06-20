@@ -125,6 +125,48 @@ fn comparison_and_select_semantics() {
 }
 
 #[test]
+fn division_and_remainder_semantics() {
+    let zero = BV::from(0);
+    let one = BV::from(1);
+    let two = BV::from(2);
+    let three = BV::from(3);
+    let six = BV::from(6);
+    let neg_one = BV::from(0xffff_ffffu128);
+    let neg_two = BV::from(0xffff_fffeu128);
+    let neg_three = BV::from(0xffff_fffdu128);
+    let min = BV::from(0x8000_0000u128);
+
+    assert_eq!(six.checked_udiv(two).unwrap().0, 3);
+    assert_eq!(six.checked_urem(BV::from(4)).unwrap().0, 2);
+    assert_eq!(neg_two.checked_sdiv(two).unwrap().0, neg_one.0);
+    assert_eq!(neg_three.checked_srem(two).unwrap().0, neg_one.0);
+
+    assert_eq!(six.checked_udiv(zero), None);
+    assert_eq!(six.checked_urem(zero), None);
+    assert_eq!(six.checked_sdiv(zero), None);
+    assert_eq!(six.checked_srem(zero), None);
+    assert_eq!(min.checked_sdiv(neg_one), None);
+    assert_eq!(min.checked_srem(neg_one), Some(zero));
+
+    assert_eq!(three.checked_sdiv(one).unwrap().0, three.0);
+    assert_eq!(three.checked_srem(one).unwrap().0, zero.0);
+}
+
+#[test]
+fn min_and_max_semantics() {
+    let zero = BV::from(0);
+    let neg_one = BV::from(0xffff_ffffu128);
+    let min = BV::from(0x8000_0000u128);
+
+    assert_eq!(zero.umin(neg_one).0, zero.0);
+    assert_eq!(zero.umax(neg_one).0, neg_one.0);
+    assert_eq!(zero.smin(neg_one).0, neg_one.0);
+    assert_eq!(zero.smax(neg_one).0, zero.0);
+    assert_eq!(min.smin(zero).0, min.0);
+    assert_eq!(min.smax(zero).0, zero.0);
+}
+
+#[test]
 fn z3_validates_rotation_semantics() {
     assert!(valid("(rotl a 0) <=> a"));
     assert!(valid("(rotr a 0) <=> a"));
@@ -193,6 +235,37 @@ fn z3_validates_comparison_and_select_semantics() {
 }
 
 #[test]
+fn z3_validates_division_and_remainder_semantics() {
+    assert!(valid("(udiv a 1) <=> a"));
+    assert!(valid("(sdiv a 1) <=> a"));
+    assert!(valid("(urem a 1) <=> 0"));
+    assert!(valid("(srem a 1) <=> 0"));
+
+    assert!(valid("(select 0 (udiv a 0) b) <=> b"));
+    assert!(!valid("(select 1 (udiv a 0) b) <=> b"));
+
+    assert!(!valid("(udiv a 0) <=> 0"));
+    assert!(!valid("(sdiv -2147483648 -1) <=> -2147483648"));
+    assert!(!valid("(udiv -2 2) <=> (sdiv -2 2)"));
+}
+
+#[test]
+fn z3_validates_min_and_max_semantics() {
+    assert!(valid("(umin a b) <=> (umin b a)"));
+    assert!(valid("(umax a b) <=> (umax b a)"));
+    assert!(valid("(smin a b) <=> (smin b a)"));
+    assert!(valid("(smax a b) <=> (smax b a)"));
+
+    assert!(valid("(umin a a) <=> a"));
+    assert!(valid("(umax a a) <=> a"));
+    assert!(valid("(smin a a) <=> a"));
+    assert!(valid("(smax a a) <=> a"));
+
+    assert!(!valid("(umin 0 -1) <=> -1"));
+    assert!(!valid("(smin 0 -1) <=> 0"));
+}
+
+#[test]
 fn parses_negative_constants_as_wrapped_bitvectors() {
     assert_eq!("-1".parse::<BV>().unwrap().0, 0xffff_ffff);
 }
@@ -209,8 +282,9 @@ fn synthesize_clif32_shift_rules() {
             &[
                 &["ineg", "bnot"],
                 &[
-                    "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr", "eq",
-                    "ne", "ule", "ult", "uge", "ugt", "sle", "slt", "sge", "sgt",
+                    "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor",
+                    "ishl", "ushr", "sshr", "umin", "umax", "smin", "smax", "eq", "ne", "ule",
+                    "ult", "uge", "ugt", "sle", "slt", "sge", "sgt",
                 ],
                 &["select"],
             ],

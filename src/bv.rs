@@ -198,11 +198,81 @@ impl<const N: Inner> BV<N> {
         Self::bool(self.signed() > rhs.signed())
     }
 
+    pub fn umin(self, rhs: Self) -> Self {
+        if self.0 <= rhs.0 {
+            self
+        } else {
+            rhs
+        }
+    }
+
+    pub fn umax(self, rhs: Self) -> Self {
+        if self.0 >= rhs.0 {
+            self
+        } else {
+            rhs
+        }
+    }
+
+    pub fn smin(self, rhs: Self) -> Self {
+        if self.signed() <= rhs.signed() {
+            self
+        } else {
+            rhs
+        }
+    }
+
+    pub fn smax(self, rhs: Self) -> Self {
+        if self.signed() >= rhs.signed() {
+            self
+        } else {
+            rhs
+        }
+    }
+
     pub fn select(self, then_val: Self, else_val: Self) -> Self {
         if self.0 != 0 {
             then_val
         } else {
             else_val
+        }
+    }
+
+    pub fn checked_udiv(self, rhs: Self) -> Option<Self> {
+        if rhs.0 == 0 {
+            None
+        } else {
+            Some(Self::new(self.0 / rhs.0))
+        }
+    }
+
+    pub fn checked_urem(self, rhs: Self) -> Option<Self> {
+        if rhs.0 == 0 {
+            None
+        } else {
+            Some(Self::new(self.0 % rhs.0))
+        }
+    }
+
+    pub fn checked_sdiv(self, rhs: Self) -> Option<Self> {
+        let lhs = self.signed();
+        let rhs = rhs.signed();
+        if rhs == 0 || (self == Self::MIN && rhs == -1) {
+            None
+        } else {
+            Some(Self::new((lhs / rhs) as u128))
+        }
+    }
+
+    pub fn checked_srem(self, rhs: Self) -> Option<Self> {
+        let lhs = self.signed();
+        let rhs = rhs.signed();
+        if rhs == 0 {
+            None
+        } else if self == Self::MIN && rhs == -1 {
+            Some(Self::ZERO)
+        } else {
+            Some(Self::new((lhs % rhs) as u128))
         }
     }
 }

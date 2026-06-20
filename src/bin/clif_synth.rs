@@ -23,8 +23,9 @@ fn main() {
             &[
                 &["ineg", "bnot", "ctz", "clz", "cls", "popcnt"],
                 &[
-                    "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr", "rotl",
-                    "rotr", "eq", "ne", "ule", "ult", "uge", "ugt", "sle", "slt", "sge", "sgt",
+                    "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor",
+                    "ishl", "ushr", "sshr", "rotl", "rotr", "umin", "umax", "smin", "smax", "eq",
+                    "ne", "ule", "ult", "uge", "ugt", "sle", "slt", "sge", "sgt",
                 ],
                 &["select"],
             ],
