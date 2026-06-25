@@ -50,7 +50,7 @@ impl ToString for Strategy {
 }
 
 fn main() {
-    env_logger::init();
+    // env_logger::init();
 
     let args = Args::parse();
     if let Err(err) = clif::run(args.strategy, args.atoms, args.prior) {
