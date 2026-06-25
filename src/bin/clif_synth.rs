@@ -1,10 +1,10 @@
-use std::str::FromStr;
+use std::{fs, path::PathBuf, process, str::FromStr};
 
 use clap::Parser;
 use log::info;
 use ruler::{
-    enumo::{Filter, Metric, Ruleset, Workload},
-    recipe_utils::{recursive_rules, run_workload, Lang},
+    enumo::{Filter, Metric, Rule, Ruleset, Workload},
+    recipe_utils::{recursive_rules_with_base_allow_empty_and_canon, run_workload, Lang},
     Limits, SynthLanguage,
 };
 
@@ -13,11 +13,11 @@ struct Args {
     #[clap(long, default_value_t = 4)]
     atoms: usize,
 
-    #[clap(long, default_value_t = 32)]
-    bits: u16,
-
     #[clap(long, default_value_t = Strategy::Naive)]
     strategy: Strategy,
+
+    #[clap(long)]
+    prior: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Parser)]
@@ -53,56 +53,75 @@ fn main() {
     env_logger::init();
 
     let args = Args::parse();
-
-    match args.bits {
-        8 => clif8::run(args.strategy, args.atoms),
-        16 => clif16::run(args.strategy, args.atoms),
-        32 => clif32::run(args.strategy, args.atoms),
-        64 => clif64::run(args.strategy, args.atoms),
-        bits => panic!(
-            "unsupported CLIF bit width {}; expected one of 8, 16, 32, or 64",
-            bits
-        ),
+    if let Err(err) = clif::run(args.strategy, args.atoms, args.prior) {
+        eprintln!("{err}");
+        process::exit(1);
     }
 }
 
-mod clif8 {
-    ruler::impl_clif_bv!(8);
-
-    pub fn run(strategy: super::Strategy, atoms: usize) {
-        super::run::<Clif>(strategy, atoms, 8);
-    }
-}
-
-mod clif16 {
-    ruler::impl_clif_bv!(16);
-
-    pub fn run(strategy: super::Strategy, atoms: usize) {
-        super::run::<Clif>(strategy, atoms, 16);
-    }
-}
-
-mod clif32 {
+mod clif {
+    // Concrete sampling width for cvec generation only. Rule validation is
+    // bitwidth-polymorphic over the symbolic CLIF type atoms.
     ruler::impl_clif_bv!(32);
 
-    pub fn run(strategy: super::Strategy, atoms: usize) {
-        super::run::<Clif>(strategy, atoms, 32);
+    pub fn run(
+        strategy: super::Strategy,
+        atoms: usize,
+        prior: Option<std::path::PathBuf>,
+    ) -> Result<(), String> {
+        super::run::<Clif>(strategy, atoms, prior)
     }
 }
 
-mod clif64 {
-    ruler::impl_clif_bv!(64);
-
-    pub fn run(strategy: super::Strategy, atoms: usize) {
-        super::run::<Clif>(strategy, atoms, 64);
-    }
-}
-
-fn run<L: SynthLanguage>(strategy: Strategy, atoms: usize, bits: u16) {
+fn run<L: SynthLanguage>(
+    strategy: Strategy,
+    atoms: usize,
+    prior: Option<PathBuf>,
+) -> Result<(), String> {
+    let prior = load_prior::<L>(prior)?;
     match strategy {
-        Strategy::Naive => naive_synthesis::<L>(atoms, bits),
-        Strategy::Halide => halide_like_synthesis::<L>(atoms, bits),
+        Strategy::Naive => naive_synthesis::<L>(atoms, prior),
+        Strategy::Halide => halide_like_synthesis::<L>(atoms, prior),
     }
+    Ok(())
+}
+
+fn load_prior<L: SynthLanguage>(path: Option<PathBuf>) -> Result<Ruleset<L>, String> {
+    let Some(path) = path else {
+        return Ok(Ruleset::default());
+    };
+    let input = fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read prior rules {}: {err}", path.display()))?;
+    let mut rules = Ruleset::default();
+    for (line_no, line) in input.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        let (forward, backward) = Rule::<L>::from_string(line)
+            .map_err(|err| format!("{}:{}: {err}", path.display(), line_no + 1))?;
+        if !forward.is_valid() {
+            return Err(format!(
+                "{}:{}: invalid prior rule `{}`",
+                path.display(),
+                line_no + 1,
+                forward
+            ));
+        }
+        rules.add(forward);
+        if let Some(backward) = backward {
+            if !backward.is_valid() {
+                return Err(format!(
+                    "{}:{}: invalid prior rule `{}`",
+                    path.display(),
+                    line_no + 1,
+                    backward
+                ));
+            }
+            rules.add(backward);
+        }
+    }
+    Ok(rules)
 }
 
 fn lang(vals: Vec<String>, vars: &[&str], ops: &[&[&str]]) -> Lang {
@@ -123,27 +142,55 @@ fn base_vals() -> Vec<String> {
         .collect()
 }
 
-fn shift_vals(bits: u16) -> Vec<String> {
-    let mut vals = base_vals();
-    vals.extend([
-        (bits - 1).to_string(),
-        bits.to_string(),
-        (bits + 1).to_string(),
-    ]);
-    vals.sort();
-    vals.dedup();
-    vals
+fn clif_base_lang() -> Workload {
+    Workload::new([
+        "VAR",
+        "VAL",
+        "(OP1 ty EXPR)",
+        "(OP1 ty1 EXPR)",
+        "(OP1 ty2 EXPR)",
+        "(OP2 ty EXPR EXPR)",
+        "(OP2 ty1 EXPR EXPR)",
+        "(OP2 ty2 EXPR EXPR)",
+        "(OP3 ty EXPR EXPR EXPR)",
+        "(OP3 ty1 EXPR EXPR EXPR)",
+        "(OP3 ty2 EXPR EXPR EXPR)",
+    ])
 }
 
-fn naive_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
-    let rules = recursive_rules(
+fn clif_rules<L: SynthLanguage>(
+    metric: Metric,
+    atoms: usize,
+    lang: Lang,
+    prior: Ruleset<L>,
+) -> Ruleset<L> {
+    let canon_symbols = vec![
+        lang.vars.clone(),
+        vec!["ty".to_string(), "ty1".to_string(), "ty2".to_string()],
+    ];
+    recursive_rules_with_base_allow_empty_and_canon(
+        metric,
+        atoms,
+        lang,
+        clif_base_lang(),
+        prior,
+        atoms + 1,
+        canon_symbols,
+    )
+}
+
+fn naive_synthesis<L: SynthLanguage>(atoms: usize, prior: Ruleset<L>) {
+    let rules = clif_rules(
         Metric::Atoms,
         atoms,
         lang(
-            shift_vals(bits),
+            base_vals(),
             &["x", "y", "z"],
             &[
-                &["ineg", "iabs", "bnot", "ctz", "clz", "cls", "popcnt"],
+                &[
+                    "ineg", "iabs", "bnot", "ctz", "clz", "cls", "popcnt", "uextend", "sextend",
+                    "ireduce",
+                ],
                 &[
                     "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor",
                     "ishl", "ushr", "sshr", "rotl", "rotr", "umin", "umax", "smin", "smax", "eq",
@@ -152,23 +199,23 @@ fn naive_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
                 &["select"],
             ],
         ),
-        Ruleset::<L>::default(),
+        prior,
     );
 
     rules.pretty_print();
 }
 
-fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
-    let mut all_rules = Ruleset::<L>::default();
+fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, prior: Ruleset<L>) {
+    let mut all_rules = prior;
 
-    let arith_bits = recursive_rules(
+    let arith_bits = clif_rules(
         Metric::Atoms,
         atoms,
         lang(
             base_vals(),
             &["x", "y", "z"],
             &[
-                &["ineg", "iabs", "bnot"],
+                &["ineg", "iabs", "bnot", "uextend", "sextend", "ireduce"],
                 &[
                     "iadd", "isub", "imul", "band", "bor", "bxor", "umin", "umax", "smin", "smax",
                 ],
@@ -180,14 +227,14 @@ fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
 
     info!("arith bits rules are synthesized");
 
-    let shift_bits = recursive_rules(
+    let shift_bits = clif_rules(
         Metric::Atoms,
         atoms,
         lang(
-            shift_vals(bits),
+            base_vals(),
             &["x", "y", "z"],
             &[
-                &["bnot"],
+                &["bnot", "uextend", "sextend", "ireduce"],
                 &[
                     "ishl", "ushr", "sshr", "rotl", "rotr", "band", "bor", "bxor",
                 ],
@@ -199,14 +246,14 @@ fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
 
     info!("shift/rot rules are synthesized");
 
-    let cmp_select = recursive_rules(
+    let cmp_select = clif_rules(
         Metric::Atoms,
         atoms,
         lang(
             base_vals(),
             &["x", "y", "z"],
             &[
-                &["ineg", "iabs", "bnot"],
+                &["ineg", "iabs", "bnot", "uextend", "sextend", "ireduce"],
                 &[
                     "eq", "ne", "ule", "ult", "uge", "ugt", "sle", "slt", "sge", "sgt", "umin",
                     "umax", "smin", "smax",
@@ -220,13 +267,16 @@ fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
 
     info!("cmp/select rules are synthesized");
 
-    let div_rem = recursive_rules(
+    let div_rem = clif_rules(
         Metric::Atoms,
         atoms,
         lang(
             base_vals(),
             &["x", "y", "z"],
-            &[&["ineg", "iabs"], &["udiv", "sdiv", "urem", "srem"]],
+            &[
+                &["ineg", "iabs", "uextend", "sextend", "ireduce"],
+                &["udiv", "sdiv", "urem", "srem"],
+            ],
         ),
         all_rules.clone(),
     );
@@ -234,14 +284,17 @@ fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
     info!("div/rem rules are synthesized");
 
     let full_atoms = atoms.saturating_sub(1).max(1);
-    let full = recursive_rules(
+    let full = clif_rules(
         Metric::Atoms,
         full_atoms,
         lang(
-            shift_vals(bits),
+            base_vals(),
             &["x", "y", "z"],
             &[
-                &["ineg", "iabs", "bnot", "ctz", "clz", "cls", "popcnt"],
+                &[
+                    "ineg", "iabs", "bnot", "ctz", "clz", "cls", "popcnt", "uextend", "sextend",
+                    "ireduce",
+                ],
                 &[
                     "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor",
                     "ishl", "ushr", "sshr", "rotl", "rotr", "umin", "umax", "smin", "smax", "eq",
@@ -260,8 +313,8 @@ fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
         match_: 100_000,
     };
 
-    let nested_bops_arith = Workload::new(&["(bop e e)", "v"])
-        .plug("e", &Workload::new(&["(bop v v)", "(uop v)", "v"]))
+    let nested_bops_arith = Workload::new(&["(bop ty e e)", "v"])
+        .plug("e", &Workload::new(&["(bop ty v v)", "(uop ty v)", "v"]))
         .plug("bop", &Workload::new(&["iadd", "isub", "imul"]))
         .plug("uop", &Workload::new(&["ineg", "bnot"]))
         .plug("v", &Workload::new(&["x", "y", "z"]))
@@ -279,8 +332,8 @@ fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
     );
     all_rules.extend(new);
 
-    let nested_bops_full = Workload::new(&["(bop e e)", "v"])
-        .plug("e", &Workload::new(&["(bop v v)", "(uop v)", "v"]))
+    let nested_bops_full = Workload::new(&["(bop ty e e)", "v"])
+        .plug("e", &Workload::new(&["(bop ty v v)", "(uop ty v)", "v"]))
         .plug("bop", &Workload::new(&["eq", "ne", "ule", "ult"]))
         .plug("uop", &Workload::new(&["ineg", "bnot"]))
         .plug("v", &Workload::new(&["x", "y", "z"]))
@@ -299,11 +352,11 @@ fn halide_like_synthesis<L: SynthLanguage>(atoms: usize, bits: u16) {
     all_rules.extend(new);
 
     let select_base = Workload::new([
-        "(select V V V)",
-        "(select V (OP V V) V)",
-        "(select V V (OP V V))",
-        "(select V (OP V V) (OP V V))",
-        "(OP V (select V V V))",
+        "(select ty V V V)",
+        "(select ty V (OP ty V V) V)",
+        "(select ty V V (OP ty V V))",
+        "(select ty V (OP ty V V) (OP ty V V))",
+        "(OP ty V (select ty V V V))",
     ])
     .plug("V", &Workload::new(["x", "y", "z", "w"]));
 

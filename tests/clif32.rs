@@ -1,6 +1,6 @@
 use ruler::{
     enumo::{Metric, Rule, Ruleset},
-    recipe_utils::{recursive_rules, Lang},
+    recipe_utils::{recursive_rules_with_base, Lang},
 };
 
 ruler::impl_clif_bv!(32);
@@ -181,112 +181,105 @@ fn min_and_max_semantics() {
 
 #[test]
 fn z3_validates_rotation_semantics() {
-    assert!(valid("(rotl a 0) <=> a"));
-    assert!(valid("(rotr a 0) <=> a"));
-    assert!(valid("(rotl a 32) <=> a"));
-    assert!(valid("(rotr a 32) <=> a"));
-    assert!(valid("(rotl a 33) <=> (rotl a 1)"));
-    assert!(valid("(rotr a 33) <=> (rotr a 1)"));
-    assert!(valid("(rotr (rotl a b) b) <=> a"));
-    assert!(valid("(rotl (rotr a b) b) <=> a"));
-    assert!(valid("(rotl a 1) <=> (bor (ishl a 1) (ushr a 31))"));
-    assert!(valid("(rotr a 1) <=> (bor (ushr a 1) (ishl a 31))"));
+    assert!(valid("(rotl ty a 0) <=> a"));
+    assert!(valid("(rotr ty a 0) <=> a"));
+    assert!(valid("(rotr ty (rotl ty a 1) 1) <=> a"));
+    assert!(valid("(rotl ty (rotr ty a 1) 1) <=> a"));
+    assert!(!valid("(rotl ty a 32) <=> a"));
 }
 
 #[test]
 fn z3_validates_bits_semantics() {
-    assert!(valid("(clz 0) <=> 32"));
-    assert!(valid("(ctz 0) <=> 32"));
-    assert!(valid("(cls 0) <=> 31"));
-    assert!(valid("(popcnt 0) <=> 0"));
-
-    assert!(valid("(clz -1) <=> 0"));
-    assert!(valid("(ctz -1) <=> 0"));
-    assert!(valid("(cls -1) <=> 31"));
-    assert!(valid("(popcnt -1) <=> 32"));
-
-    assert!(valid("(clz 2147483648) <=> 0"));
-    assert!(valid("(ctz 2147483648) <=> 31"));
-    assert!(valid("(cls 2147483648) <=> 0"));
-    assert!(valid("(popcnt 2147483648) <=> 1"));
-
-    assert!(valid("(clz 15728640) <=> 8"));
-    assert!(valid("(ctz 15728640) <=> 20"));
-    assert!(valid("(cls 15728640) <=> 7"));
-    assert!(valid("(popcnt 15728640) <=> 4"));
-
-    assert!(valid("(popcnt a) <=> (popcnt (rotl a 1))"));
-    assert!(valid("(popcnt a) <=> (popcnt (rotr a 1))"));
-    assert!(valid("(popcnt a) <=> (popcnt (rotl a 32))"));
-    assert!(valid("(popcnt a) <=> (popcnt (rotr a 32))"));
+    assert!(valid("(popcnt ty 0) <=> 0"));
+    assert!(valid("(clz ty -1) <=> 0"));
+    assert!(valid("(ctz ty -1) <=> 0"));
+    assert!(valid("(popcnt ty a) <=> (popcnt ty (rotl ty a 1))"));
+    assert!(valid("(popcnt ty a) <=> (popcnt ty (rotr ty a 1))"));
+    assert!(!valid("(clz ty 0) <=> 32"));
 }
 
 #[test]
 fn z3_validates_masked_shift_identities() {
-    assert!(valid("(sshr a 0) <=> a"));
-    assert!(valid("(sshr a 32) <=> a"));
-    assert!(valid("(sshr a 33) <=> (sshr a 1)"));
-    assert!(valid("(ushr a 32) <=> a"));
-    assert!(valid("(ishl a 32) <=> a"));
+    assert!(valid("(sshr ty a 0) <=> a"));
+    assert!(valid("(ushr ty a 0) <=> a"));
+    assert!(valid("(ishl ty a 0) <=> a"));
+    assert!(!valid("(sshr ty a 32) <=> a"));
 }
 
 #[test]
 fn z3_validates_comparison_and_select_semantics() {
-    assert!(valid("(ult a b) <=> (ugt b a)"));
-    assert!(valid("(ule a b) <=> (uge b a)"));
-    assert!(valid("(slt a b) <=> (sgt b a)"));
-    assert!(valid("(sle a b) <=> (sge b a)"));
-    assert!(valid("(eq a b) <=> (eq b a)"));
-    assert!(valid("(ne a b) <=> (ne b a)"));
+    assert!(valid("(ult ty a b) <=> (ugt ty b a)"));
+    assert!(valid("(ule ty a b) <=> (uge ty b a)"));
+    assert!(valid("(slt ty a b) <=> (sgt ty b a)"));
+    assert!(valid("(sle ty a b) <=> (sge ty b a)"));
+    assert!(valid("(eq ty a b) <=> (eq ty b a)"));
+    assert!(valid("(ne ty a b) <=> (ne ty b a)"));
 
-    assert!(valid("(select 0 a b) <=> b"));
-    assert!(valid("(select 1 a b) <=> a"));
-    assert!(valid("(select 2 a b) <=> a"));
+    assert!(valid("(select ty 0 a b) <=> b"));
+    assert!(valid("(select ty 1 a b) <=> a"));
+    assert!(valid("(select ty 2 a b) <=> a"));
 
-    assert!(!valid("(ult -1 0) <=> 1"));
-    assert!(!valid("(slt 0 -1) <=> 1"));
+    assert!(!valid("(ult ty -1 0) <=> 1"));
+    assert!(!valid("(slt ty 0 -1) <=> 1"));
 }
 
 #[test]
 fn z3_validates_iabs_semantics() {
-    assert!(valid("(iabs 0) <=> 0"));
-    assert!(valid("(iabs 1) <=> 1"));
-    assert!(valid("(iabs -1) <=> 1"));
-    assert!(valid("(iabs -2147483648) <=> -2147483648"));
-    assert!(valid("(iabs (iabs a)) <=> (iabs a)"));
+    assert!(valid("(iabs ty 0) <=> 0"));
+    assert!(valid("(iabs ty 1) <=> 1"));
+    assert!(valid("(iabs ty -1) <=> 1"));
+    assert!(valid("(iabs ty (iabs ty a)) <=> (iabs ty a)"));
 
-    assert!(!valid("(iabs a) <=> a"));
+    assert!(!valid("(iabs ty a) <=> a"));
 }
 
 #[test]
 fn z3_validates_division_and_remainder_semantics() {
-    assert!(valid("(udiv a 1) <=> a"));
-    assert!(valid("(sdiv a 1) <=> a"));
-    assert!(valid("(urem a 1) <=> 0"));
-    assert!(valid("(srem a 1) <=> 0"));
+    assert!(valid("(udiv ty a 1) <=> a"));
+    assert!(valid("(sdiv ty a 1) <=> a"));
+    assert!(valid("(urem ty a 1) <=> 0"));
+    assert!(valid("(srem ty a 1) <=> 0"));
 
-    assert!(valid("(select 0 (udiv a 0) b) <=> b"));
-    assert!(!valid("(select 1 (udiv a 0) b) <=> b"));
+    assert!(valid("(select ty 0 (udiv ty a 0) b) <=> b"));
+    assert!(!valid("(select ty 1 (udiv ty a 0) b) <=> b"));
 
-    assert!(!valid("(udiv a 0) <=> 0"));
-    assert!(!valid("(sdiv -2147483648 -1) <=> -2147483648"));
-    assert!(!valid("(udiv -2 2) <=> (sdiv -2 2)"));
+    assert!(!valid("(udiv ty a 0) <=> 0"));
+    assert!(!valid("(udiv ty -2 2) <=> (sdiv ty -2 2)"));
 }
 
 #[test]
 fn z3_validates_min_and_max_semantics() {
-    assert!(valid("(umin a b) <=> (umin b a)"));
-    assert!(valid("(umax a b) <=> (umax b a)"));
-    assert!(valid("(smin a b) <=> (smin b a)"));
-    assert!(valid("(smax a b) <=> (smax b a)"));
+    assert!(valid("(umin ty a b) <=> (umin ty b a)"));
+    assert!(valid("(umax ty a b) <=> (umax ty b a)"));
+    assert!(valid("(smin ty a b) <=> (smin ty b a)"));
+    assert!(valid("(smax ty a b) <=> (smax ty b a)"));
 
-    assert!(valid("(umin a a) <=> a"));
-    assert!(valid("(umax a a) <=> a"));
-    assert!(valid("(smin a a) <=> a"));
-    assert!(valid("(smax a a) <=> a"));
+    assert!(valid("(umin ty a a) <=> a"));
+    assert!(valid("(umax ty a a) <=> a"));
+    assert!(valid("(smin ty a a) <=> a"));
+    assert!(valid("(smax ty a a) <=> a"));
 
-    assert!(!valid("(umin 0 -1) <=> -1"));
-    assert!(!valid("(smin 0 -1) <=> 0"));
+    assert!(!valid("(umin ty 0 -1) <=> -1"));
+    assert!(!valid("(smin ty 0 -1) <=> 0"));
+}
+
+#[test]
+fn z3_validates_bitwidth_polymorphic_rules_and_conversions() {
+    assert!(valid("(iadd ty a b) <=> (iadd ty b a)"));
+    assert!(valid("(rotl ty a 0) <=> a"));
+    assert!(valid("(rotr ty a 0) <=> a"));
+    assert!(!valid("(rotl ty a 32) <=> a"));
+    assert!(!valid("(iadd ty a 255) <=> (isub ty a 1)"));
+
+    assert!(valid(
+        "(ireduce ty1 (uextend ty2 (iadd ty1 a 0))) <=> (iadd ty1 a 0)"
+    ));
+    assert!(valid(
+        "(ireduce ty1 (sextend ty2 (iadd ty1 a 0))) <=> (iadd ty1 a 0)"
+    ));
+    assert!(valid("(eq ty2 (uextend ty2 0) 0) <=> 1"));
+    assert!(!valid("(uextend ty a) <=> a"));
+    assert!(!valid("(ireduce ty a) <=> a"));
 }
 
 #[test]
@@ -297,14 +290,14 @@ fn parses_negative_constants_as_wrapped_bitvectors() {
 #[test]
 #[ignore = "can take a long time..."]
 fn synthesize_clif32_shift_rules() {
-    let rules = recursive_rules(
+    let rules = recursive_rules_with_base(
         Metric::Atoms,
         5,
         Lang::new(
             &["0", "1", "-1", "31", "32", "33"],
             &["a", "b"],
             &[
-                &["ineg", "iabs", "bnot"],
+                &["ineg", "iabs", "bnot", "uextend", "sextend", "ireduce"],
                 &[
                     "iadd", "isub", "imul", "udiv", "sdiv", "urem", "srem", "band", "bor", "bxor",
                     "ishl", "ushr", "sshr", "umin", "umax", "smin", "smax", "eq", "ne", "ule",
@@ -313,6 +306,19 @@ fn synthesize_clif32_shift_rules() {
                 &["select"],
             ],
         ),
+        ruler::enumo::Workload::new([
+            "VAR",
+            "VAL",
+            "(OP1 ty EXPR)",
+            "(OP1 ty1 EXPR)",
+            "(OP1 ty2 EXPR)",
+            "(OP2 ty EXPR EXPR)",
+            "(OP2 ty1 EXPR EXPR)",
+            "(OP2 ty2 EXPR EXPR)",
+            "(OP3 ty EXPR EXPR EXPR)",
+            "(OP3 ty1 EXPR EXPR EXPR)",
+            "(OP3 ty2 EXPR EXPR EXPR)",
+        ]),
         Ruleset::<Clif>::default(),
     );
 

@@ -53,7 +53,7 @@ fn run_workload_internal<L: SynthLanguage>(
         panic!("Didn't learn any rules!");
     }
 
-    println!(
+    eprintln!(
         "Learned {} bidirectional rewrites ({} total rewrites) in {} using {} prior rewrites",
         chosen.bidir_len(),
         chosen.len(),
@@ -169,15 +169,60 @@ pub fn recursive_rules<L: SynthLanguage>(
     lang: Lang,
     prior: Ruleset<L>,
 ) -> Ruleset<L> {
+    let arity = if lang.ops.len() == 2 { 2 } else { 3 };
+    recursive_rules_with_base(metric, n, lang, base_lang(arity), prior)
+}
+
+pub fn recursive_rules_with_base<L: SynthLanguage>(
+    metric: Metric,
+    n: usize,
+    lang: Lang,
+    base_lang: Workload,
+    prior: Ruleset<L>,
+) -> Ruleset<L> {
+    recursive_rules_with_base_allow_empty(metric, n, lang, base_lang, prior, 3)
+}
+
+pub fn recursive_rules_with_base_allow_empty<L: SynthLanguage>(
+    metric: Metric,
+    n: usize,
+    lang: Lang,
+    base_lang: Workload,
+    prior: Ruleset<L>,
+    allow_empty_below: usize,
+) -> Ruleset<L> {
+    recursive_rules_with_base_allow_empty_and_canon(
+        metric,
+        n,
+        lang,
+        base_lang,
+        prior,
+        allow_empty_below,
+        vec![],
+    )
+}
+
+pub fn recursive_rules_with_base_allow_empty_and_canon<L: SynthLanguage>(
+    metric: Metric,
+    n: usize,
+    lang: Lang,
+    base_lang: Workload,
+    prior: Ruleset<L>,
+    allow_empty_below: usize,
+    canon_symbols: Vec<Vec<String>>,
+) -> Ruleset<L> {
     if n < 1 {
         Ruleset::default()
     } else {
-        let mut rec = recursive_rules(metric, n - 1, lang.clone(), prior.clone());
-        let base_lang = if lang.ops.len() == 2 {
-            base_lang(2)
-        } else {
-            base_lang(3)
-        };
+        let mut rec = recursive_rules_with_base_allow_empty_and_canon(
+            metric,
+            n - 1,
+            lang.clone(),
+            base_lang.clone(),
+            prior.clone(),
+            allow_empty_below,
+            canon_symbols.clone(),
+        );
         let mut wkld = iter_metric(base_lang, "EXPR", metric, n)
             .filter(Filter::Contains("VAR".parse().unwrap()))
             .plug("VAR", &Workload::new(lang.vars))
@@ -186,8 +231,11 @@ pub fn recursive_rules<L: SynthLanguage>(
         for (i, ops) in lang.ops.iter().enumerate() {
             wkld = wkld.plug(format!("OP{}", i + 1), &Workload::new(ops));
         }
+        for symbols in canon_symbols {
+            wkld = wkld.filter(Filter::Canon(symbols));
+        }
         rec.extend(prior);
-        let allow_empty = n < 3;
+        let allow_empty = n < allow_empty_below;
         let new = run_workload_internal(
             wkld,
             rec.clone(),
